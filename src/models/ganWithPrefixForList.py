@@ -68,7 +68,7 @@ class Discriminator(nn.Module):
 
 
 
-def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr:float, num_epochs:int, device='cpu'):
+def train(dataloader, prefix:str, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr:float, num_epochs:int, device='cpu'):
     
     Tensor = torch.FloatTensor
 #     else:
@@ -159,13 +159,13 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
                     "Epochs": epoch,
                     "generator": netG.state_dict(),
                     "optimizerG": optimizerG.state_dict(),
-                }, "{}/generator_{}.pth".format('models', epoch))
+                }, "{}/generator{}__{}.pth".format('models', prefix, epoch))
             
             torch.save({
                     "Epochs": epoch,
                     "discriminator": netD.state_dict(),
                     "optimizerD": optimizerD.state_dict()
-                }, "{}/discriminator_{}.pth".format('models', epoch))
+                }, "{}/discriminator_prefix{}_{}.pth".format('models', prefix, epoch))
             # # Check how the generator is doing by saving G's output on fixed_noise
             # if (iters % 500 == 0) or ((epoch == epochs-1) and (i == len(dataloader)-1)):
             #     with torch.no_grad():
@@ -180,13 +180,13 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
     print('It took ', seconds_elapsed)
     return xgb_losses, G_losses, D_losses
 
-def generate_data(epoch: int, randomNoise_dim: int, hidden_dim: int, realData_dim: int, amount: int, device: str):
+def generate_data(prefix, epoch, randomNoise_dim, hidden_dim, realData_dim, amount, device):
     if device is 'cpu':
         Tensor = torch.FloatTensor
     else:
         Tensor = torch.cuda.FloatTensor
     netG = Generator(randomNoise_dim, hidden_dim, realData_dim).to(device)
-    checkpoint = torch.load(f'models/generator_{str(epoch)}.pth')
+    checkpoint = torch.load(f'models/generator{prefix}__{str(epoch)}.pth')
     netG.load_state_dict(checkpoint['generator'])
     noise = Variable(Tensor(np.random.normal(0, 1, (amount, randomNoise_dim))))
     generated_data = netG(noise)
