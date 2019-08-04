@@ -33,9 +33,9 @@ class Generator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(hidden_dim, hidden_dim*2),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(hidden_dim*2, hidden_dim),
+            nn.Linear(hidden_dim*2, hidden_dim*4),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(hidden_dim, realData_dim)
+            nn.Linear(hidden_dim*4, realData_dim),
         )
 
     def forward(self, input):
@@ -53,9 +53,9 @@ class Discriminator(nn.Module):
         '''
         super(Discriminator, self).__init__()
         self.main = nn.Sequential(
-            nn.Linear(realData_dim, hidden_dim),
+            nn.Linear(realData_dim, hidden_dim*4),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(hidden_dim, hidden_dim*2),
+            nn.Linear(hidden_dim*4, hidden_dim*2),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(hidden_dim*2, hidden_dim),
             nn.LeakyReLU(0.2, inplace=True),
@@ -68,7 +68,7 @@ class Discriminator(nn.Module):
 
 
 
-def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr:float, num_epochs:int, device='cpu'):
+def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr:float, num_epochs:int, feature_cols, label_col=[], device='cpu'):
     
     Tensor = torch.FloatTensor
 #     else:
@@ -76,12 +76,15 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
         
         
     G_losses = []
-    D_losses = []
+    D_RealLosses = []
+    D_FakeLosses = []
     xgb_losses = []
     
     netG = Generator(randomNoise_dim, hidden_dim, realData_dim).to(device)
     netD = Discriminator(realData_dim, hidden_dim).to(device)
     
+    print(netG)
+    print(netD)
     optimizerG = optim.Adam(netG.parameters(), lr=lr, betas=(0.5, 0.999))
     optimizerD = optim.Adam(netD.parameters(), lr=lr, betas=(0.5, 0.999))
 
@@ -91,13 +94,14 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
     # set the train mode - Just necessary if dropout used
     # netG.train()
     # netD.train()    
-    
     print("Starting Training Loop...")
     start_time = time()
-    
-    for epoch in range(num_epochs+1):
+    num_epochs = num_epochs +1
+
+    for epoch in range(num_epochs):
         G_losses_iter = []
-        D_losses_iter = []
+        D_RealLosses_iter = []
+        D_FakeLosses_iter = []
         generated_data = []
         real_data_list = []
         for i, data in enumerate(dataloader):
@@ -107,54 +111,59 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
             real_data = Variable(data.type(Tensor))
 
             # Train Discriminator on real data
-            netD.zero_grad()
-            predD_real = netD(real_data)
-            errD_real = adversarial_loss(predD_real, valid)
-            errD_real.backward()
+            optimizerD.zero_grad()
+            #netD.zero_grad()
+            predD_real = netD(real_data) #Prediction of the discriminator on real data as input
+            lossD_real = adversarial_loss(predD_real, valid) #Binary cross entropy loss on discriminator prediction and true
+            lossD_real.backward()
 
-
-            noise = Variable(Tensor(np.random.normal(0, 1, (data.shape[0], randomNoise_dim))))
+            noise = Variable(Tensor(np.random.normal(0, 1, (data.shape[0], randomNoise_dim)))) #Create noise in batch size
 
             # Train on fake data
-            fake_samples = netG(noise)
+            fake_samples = netG(noise)         # Generate fake samples with noise
 
-            predD_fake = netD(fake_samples.detach())
-            errD_fake = adversarial_loss(predD_fake, fake)
-            errD_fake.backward()
+            predD_fake = netD(fake_samples.detach()) # Prediction of the discriminator on fake samples
+            lossD_fake = adversarial_loss(predD_fake, fake) # Binary cross entropy loss on discriminator prediction and fake
+            lossD_fake.backward()
 
-            errD = errD_real + errD_fake
+            #errD = errD_real + errD_fake
 
             optimizerD.step()
     
-
-            netG.zero_grad()
+            optimizerG.zero_grad()
+            #netG.zero_grad()
             predD_fake = netD(fake_samples)
-            errG = adversarial_loss(predD_fake, valid)
-            errG.backward()
+            lossG = adversarial_loss(predD_fake, valid) # Binary cross entropy loss on discriminator prediction on fake and 1 to improve generator
+            lossG.backward()
 
             optimizerG.step()
               
 
             # Save Losses for plotting later
             generated_data.extend(fake_samples.detach().numpy())
-            real_data_list.extend(data.numpy())
+            real_data_list.extend(real_data.numpy())
             
-            G_losses_iter.append(errG.item())
-            D_losses_iter.append(errD.item())
+            D_RealLosses_iter.append(lossD_real.item())
+            D_FakeLosses_iter.append(lossD_fake.item())
+            G_losses_iter.append(lossG.item())
+
         
         G_losses_iter_mean = sum(G_losses_iter)/len(G_losses_iter)
-        D_losses_iter_mean = sum(D_losses_iter)/len(D_losses_iter)
+        D_RealLosses_iter_mean = sum(D_RealLosses_iter)/len(D_RealLosses_iter)
+        D_FakeLosses_iter_mean = sum(D_FakeLosses_iter)/len(D_FakeLosses_iter)
+
         G_losses.append(G_losses_iter_mean)
-        D_losses.append(D_losses_iter_mean)
+        D_RealLosses.append(D_RealLosses_iter_mean)
+        D_FakeLosses.append(D_FakeLosses_iter_mean)
 
         
         if epoch % 10 is 0:
-            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data)
+            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data, feature_cols, label_col)
             xgb_losses = np.append(xgb_losses, xgb_loss)
             print(f'epoch: {epoch}, Accuracy: {xgb_loss}')
-            print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\t'
-                    % (epoch, num_epochs+1, i, len(dataloader),
-                        errD.item(), errG.item()))
+            print('[%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\t'
+                    % (epoch, num_epochs,
+                        D_RealLosses_iter_mean, G_losses_iter_mean))
             torch.save({
                     "Epochs": epoch,
                     "generator": netG.state_dict(),
@@ -166,11 +175,13 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
                     "discriminator": netD.state_dict(),
                     "optimizerD": optimizerD.state_dict()
                 }, "{}/discriminator_{}.pth".format('models', epoch))
-            # # Check how the generator is doing by saving G's output on fixed_noise
-            # if (iters % 500 == 0) or ((epoch == epochs-1) and (i == len(dataloader)-1)):
-            #     with torch.no_grad():
-            #         fake = netG(fixed_noise).detach().cpu()
-            #     img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
+
+            accuracy_XGboost.PlotData(real_data_list, generated_data, feature_cols, label_col, seed=42, data_dim=2)
+                # # Check how the generator is doing by saving G's output on fixed_noise
+                # if (iters % 500 == 0) or ((epoch == epochs-1) and (i == len(dataloader)-1)):
+                #     with torch.no_grad():
+                #         fake = netG(fixed_noise).detach().cpu()
+                #     img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
 
             
 
@@ -178,7 +189,7 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
     end_time = time()
     seconds_elapsed = end_time - start_time
     print('It took ', seconds_elapsed)
-    return xgb_losses, G_losses, D_losses
+    return xgb_losses, G_losses, D_RealLosses, D_FakeLosses, generated_data, real_data_list
 
 def generate_data(epoch: int, randomNoise_dim: int, hidden_dim: int, realData_dim: int, amount: int, device: str):
     if device is 'cpu':

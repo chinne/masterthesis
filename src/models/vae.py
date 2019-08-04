@@ -3,6 +3,52 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+from torch.autograd import Variable
+
+from time import time
+
+class Encoder(nn.Module):
+    def __init__(self, dataDim, compressDims, embeddingDim):
+        super(Encoder, self).__init__()
+        dim = dataDim
+        seq = []
+        for item in list(compressDims):
+            seq += [
+                nn.Linear(dim, item),
+                nn.ReLU()
+            ]
+            dim = item
+        self.seq = nn.Sequential(*seq)
+        self.fc1 = nn.Linear(dim, embeddingDim)
+        self.fc2 = nn.Linear(dim, embeddingDim)
+
+    def forward(self, input):
+        feature = self.seq(input)
+        mu = self.fc1(feature)
+        logvar = self.fc2(feature)
+        std = torch.exp(0.5 * logvar)
+        return mu, std, logvar
+
+class Decoder(nn.Module):
+    def __init__(self, embeddingDim, decompressDims, dataDim):
+        super(Decoder, self).__init__()
+        dim = embeddingDim
+        seq = []
+        for item in list(decompressDims):
+            seq += [
+                nn.Linear(dim, item),
+                nn.ReLU()
+            ]
+            dim = item
+        seq.append(nn.Linear(dim, dataDim))
+        self.seq = nn.Sequential(*seq)
+        self.sigma = nn.Parameter(torch.ones(dataDim) * 0.1)
+
+    def forward(self, input):
+        return self.seq(input), self.sigma
+
+
+
 class VAE(nn.Module):
     '''
     This class generates a variational autoencoder (VAE).
@@ -41,75 +87,91 @@ class VAE(nn.Module):
         return self.decoder(z), mu, logvar
 
 
-def train_VAE(dataloader, data_dim:int,  encoder_hidden_dim: int, decoder_hidden_dim: int, z_dim:int, lr:float, num_epochs:int, device='cpu'):
+def train(dataloader, num_epochs:int, data_dim:int, feature_cols, label_col=[], embeddingDim=128, compressDims=(128, 128), decompressDims=(128, 128)):
     '''
     Training function for the VAE
     '''
     
-    Tensor = torch.cuda.FloatTensor if device else torch.FloatTensor
+    Tensor = torch.FloatTensor
     
+    encoder = Encoder(data_dim, compressDims, embeddingDim)
+    decoder = Decoder(embeddingDim, compressDims, data_dim)
+
+    def loss_function(recon_x, x, sigmas, mu, logvar):
+        print(recon_x.size(), x.size())
+        recon_loss = F.cross_entropy(recon_x, x.view(-1,29), reduction='sum')
+        KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) # Calculate KLD
+        return BCE + KLD
+
+
+    loss_factor = 2
+    l2scale = 1e-5
+    optimizer = optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), weight_decay=l2scale)
     #Create VAE object
-    vae = VAE(data_dim, encoder_hidden_dim, decoder_hidden_dim, z_dim) 
+    #vae = VAE(data_dim, encoder_hidden_dim, decoder_hidden_dim, z_dim) 
     
     #In case of an available supported gpu use it
-    vae.to(device)
+    #vae.to(device)
     
     #Construct optimizer for the VAE - in this case adam
     #lr: learning rate (default: 1e-3)
     #betas: coefficients used for computing running averages of gradient and its square (default: (0.9, 0.999))
-    optimizer = optim.Adam(vae.parameters(), lr=lr, betas=(0.5, 0.999))
+    #optimizer = optim.Adam(vae.parameters(), lr=lr, betas=(0.5, 0.999))
     
-    G_losses = []
+    losses = []
     D_losses = []
     
     # set the train mode
     #vae.train()
 
     # Creates a criterion that measures the Binary Cross Entropy between the target and the output
-    adversarial_loss = nn.BCELoss()
+    #adversarial_loss = nn.BCELoss()
 
     print("Starting Training Loop...")
     start_time = time()
-
+    train_loss = 0
     for epoch in range(num_epochs):
         for i, data in enumerate(dataloader):
-            print('The variables i value is', i)
-            print('The shape of the variable data is ', data.shape())
 
             #set gradients of all parameters of the optimizer to zero.
             optimizer.zero_grad()
 
             #get real data
-            real_samples = Variable(data.type(Tensor))
+            real = Variable(data.type(Tensor))
+            mu, std, logvar = encoder(real)
 
+            eps = torch.randn_like(std)
+            emb = eps * std + mu #sample z
+            rec, sigmas = decoder(emb) 
+
+            Loss = loss_function(rec, real, sigmas, mu, logvar)
             loss.backward()
-            optimizerVAE.step()
-            
-        
-            if epoch % 50 is 0:
-                print(f'Epoch: {epoch} | Discriminator loss: {d_loss:.2f} | Generator loss: {g_loss:.2f}')
+            train_loss += loss.item()
+            optimizer.step()           
 
-            # Save Losses for plotting later
-            G_losses.append(g_loss.item())
-            D_losses.append(d_loss.item())
-        print(i+1, loss_1, loss_2)
-        if i+1 in self.store_epoch:
-            torch.save({
-                "encoder": encoder.state_dict(),
-                "decoder": decoder.state_dict()
-            }, "{}/model_{}.tar".format(self.working_dir, i+1))
-    
+            #decoder.sigma.data.clamp_(0.01, 1.)
+    print('====> Epoch: {} Average loss: {:.4f}'.format(
+          epoch, train_loss / len(train_loader.dataset)))
+        
+
+
+
+
+
+
+
     end_time = time()
     seconds_elapsed = end_time - start_time
     print('It took ', seconds_elapsed)
-    return G_losses, D_losses
+    return losses
 
 
 
 
 
 def loss_function(recon_x, x, mu, logvar):
-    BCE = F.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum')
+    
+    BCE = F.binary_cross_entropy(recon_x, x.view(-1, 64), reduction='sum')
 
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014

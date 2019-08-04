@@ -6,16 +6,18 @@ import pandas as pd
 
 class CreditcardDataset(Dataset):
 
-    def __init__(self, df, device, label):
-        xy = df.values
-        self.len = xy.shape[0]
-        self.features = torch.tensor(xy, dtype=torch.float32)
-        if label is 'yes':
-            self.features = torch.tensor(xy[:, 0:-1], dtype= torch.float32)
-            self.label = torch.tensor(xy[:, [-1]], dtype= torch.float32) 
-            self.label.to(device)
-        self.features.to(device)
+    def __init__(self, df=None, device=None, withLabel=None):
+        self.df = df.values
+        self.device = device
+        self.withLabel = withLabel
+        #xy = df.values
+        self.len = self.df.shape[0]
         
+        if self.withLabel is True:
+            self.features = torch.tensor(self.df[:, 0:-1], dtype= torch.float32).to(self.device)
+            self.label = torch.tensor(self.df[:, [-1]], dtype= torch.float32).to(self.device)
+            print('sdf')
+        self.features = torch.tensor(self.df, dtype=torch.float32).to(self.device)
 
     def __getitem__(self, index):
         return self.features[index]
@@ -25,8 +27,8 @@ class CreditcardDataset(Dataset):
 
 
 
-def prepareDataset(df, batch_size:int, device='cpu', label='None'):
-    dataset = CreditcardDataset(df, device, label)
+def prepareDataset(df, batch_size:int, device=None, withLabel=None):
+    dataset = CreditcardDataset(df, device, withLabel)
     dataloader = DataLoader(dataset=dataset,
                             batch_size = batch_size)
     return dataloader

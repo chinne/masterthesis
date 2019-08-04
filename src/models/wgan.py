@@ -1,136 +1,193 @@
-import numpy as np
 import torch
 import torch.nn as nn
-from torchvision.utils import make_grid
+import torch.nn.functional as F
+import torch.optim as optim
+
+import numpy as np
 from torch.autograd import Variable
-from torch import autograd
-from tensorboardX import SummaryWriter
 
-import warnings
-warnings.filterwarnings("ignore")
+import random
+from time import time
 
 
+from ..common import accuracy_XGboost
+
+randomSeed=42
+random.seed(randomSeed)
+torch.manual_seed(randomSeed)
+
+class Generator(nn.Module):
+    '''
+    This is the generator of the GAN
+    '''
+    def __init__(self, randomNoise_dim, hidden_dim, realData_dim):
+        '''
+        Args:
+            randomNoise_dim: An integer indicating the size of random noise input.
+            hidden_dim: An integer indicating the size of the first hidden dimension.
+            realData_dim: An integer indicating the real data dimension.
+        '''
+        super(Generator, self).__init__()
+        self.main = nn.Sequential(
+            nn.Linear(randomNoise_dim, hidden_dim),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_dim, hidden_dim*2),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_dim*2, hidden_dim*4),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_dim*4, realData_dim),
+        )
+
+    def forward(self, input):
+        return self.main(input)
+
+class Discriminator(nn.Module):
+    '''
+    This is the discriminator of the GAN
+    '''
+    def __init__(self, realData_dim, hidden_dim):
+        '''
+        Args:
+            realData_dim: An integer indicating the real data dimension.
+            hidden_dim: An integer indicating the size of the first hidden dimension.
+        '''
+        super(Discriminator, self).__init__()
+        self.main = nn.Sequential(
+            nn.Linear(realData_dim, hidden_dim*4),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_dim*4, hidden_dim*2),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_dim*2, hidden_dim),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, input):
+        return self.main(input)
 
 
 
+def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr:float, num_epochs:int, feature_cols, label_col=[], device='cpu'):
+    
+    Tensor = torch.FloatTensor
+#     else:
+#         Tensor = torch.cuda.FloatTensor
+        
+        
+    G_losses = []
+    D_Losses = []
+    xgb_losses = []
+    
+    netG = Generator(randomNoise_dim, hidden_dim, realData_dim).to(device)
+    netD = Discriminator(realData_dim, hidden_dim).to(device)
+    
+    print(netG)
+    print(netD)
+    optimizerG = optim.RMSprop(netG.parameters(), lr=lr)
+    optimizerD = optim.RMSprop(netD.parameters(), lr=lr)
+    # optimizerG = optim.Adam(netG.parameters(), lr=lr)
+    # optimizerD = optim.Adam(netD.parameters(), lr=lr)
+    clip_value = 0.01
+    n_critic = 5
+    # set the train mode - Just necessary if dropout used
+    # netG.train()
+    # netD.train()    
+    print("Starting Training Loop...")
+    start_time = time()
+    num_epochs = num_epochs +1
+
+    for epoch in range(num_epochs):
+        G_losses_iter = []
+        D_Losses_iter = []
+        generated_data = []
+        real_data_list = []
+        for i, data in enumerate(dataloader):
+            valid = Variable(Tensor(data.size(0), 1).fill_(0), requires_grad=False)
+            fake  = Variable(Tensor(data.size(0), 1).fill_(1), requires_grad=False)
+            for iter in range(n_critic):
+                real_data = Variable(data.type(Tensor))              
+                noise = Variable(Tensor(np.random.normal(0, 1, (data.shape[0], randomNoise_dim)))) #Create noise in batch size
+                fake_samples = netG(noise).detach()
+                optimizerD.zero_grad()
+
+                lossD = - torch.mean(netD(real_data)) + torch.mean(netD(fake_samples))
+
+                lossD.backward()
+                optimizerD.step()          
+                for p in netD.parameters():
+                    p.data.clamp_(-clip_value, clip_value)
+
+            
+            noise = Variable(Tensor(np.random.normal(0, 1, (data.shape[0], randomNoise_dim)))) #Create noise in batch size
+                
+            gen_samples = netG(noise)
+            optimizerG.zero_grad()
+            lossG = -torch.mean(netD(gen_samples))
+            lossG.backward()
+            optimizerG.step()
+
+            
+
+            # Save Losses for plotting later
+            generated_data.extend(gen_samples.detach().numpy())
+            real_data_list.extend(real_data.numpy())
+            
+            D_Losses_iter.append(lossD.item())
+            G_losses_iter.append(lossG.item())
+
+        
+        G_losses_iter_mean = sum(G_losses_iter)/len(G_losses_iter)
+        D_Losses_iter_mean = sum(D_Losses_iter)/len(D_Losses_iter)
+
+        G_losses.append(G_losses_iter_mean)
+        D_Losses.append(D_Losses_iter_mean)
+
+        
+        if epoch % 10 is 0:
+            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data, feature_cols, label_col)
+            xgb_losses = np.append(xgb_losses, xgb_loss)
+            print(f'epoch: {epoch}, Accuracy: {xgb_loss}')
+            print('[%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\t'
+                    % (epoch, num_epochs,
+                        D_Losses_iter_mean, G_losses_iter_mean))
+            torch.save({
+                    "Epochs": epoch,
+                    "generator": netG.state_dict(),
+                    "optimizerG": optimizerG.state_dict(),
+                }, "{}/generator_{}.pth".format('models', epoch))
+            
+            torch.save({
+                    "Epochs": epoch,
+                    "discriminator": netD.state_dict(),
+                    "optimizerD": optimizerD.state_dict()
+                }, "{}/discriminator_{}.pth".format('models', epoch))
+
+            accuracy_XGboost.PlotData(real_data_list, generated_data, feature_cols, label_col, seed=42, data_dim=2)
+                # # Check how the generator is doing by saving G's output on fixed_noise
+                # if (iters % 500 == 0) or ((epoch == epochs-1) and (i == len(dataloader)-1)):
+                #     with torch.no_grad():
+                #         fake = netG(fixed_noise).detach().cpu()
+                #     img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
+
+            
+
+
+    end_time = time()
+    seconds_elapsed = end_time - start_time
+    print('It took ', seconds_elapsed)
+    return xgb_losses, G_losses, D_Losses, generated_data, real_data_list
+
+def generate_data(epoch: int, randomNoise_dim: int, hidden_dim: int, realData_dim: int, amount: int, device: str):
+    if device is 'cpu':
+        Tensor = torch.FloatTensor
+    else:
+        Tensor = torch.cuda.FloatTensor
+    netG = Generator(randomNoise_dim, hidden_dim, realData_dim).to(device)
+    checkpoint = torch.load(f'models/generator_{str(epoch)}.pth')
+    netG.load_state_dict(checkpoint['generator'])
+    noise = Variable(Tensor(np.random.normal(0, 1, (amount, randomNoise_dim))))
+    generated_data = netG(noise)
+    return generated_data
 
 
 
-class WGANGP():
-    def __init__(self, generator, discriminator, g_optmizer, d_optimizer,
-                 latent_shape, dataset_name, n_critic=5, gamma=10,
-                 save_every=20, use_cuda=True, logdir=None):
-
-        self.G = generator
-        self.D = discriminator
-        self.G_opt = g_optmizer
-        self.D_opt = d_optimizer
-        self.latent_shape = latent_shape
-        self.dataset_name = dataset_name
-        self.n_critic = n_critic
-        self.gamma = gamma
-        self.save_every = save_every
-        self.use_cuda = use_cuda
-        self.writer = SummaryWriter(logdir)
-        self.steps = 0
-        self._fixed_z = torch.randn(64, *latent_shape)
-        self.hist = []
-        self.images = []
-
-        if self.use_cuda:
-            self._fixed_z = self._fixed_z.cuda()
-            self.G.cuda()
-            self.D.cuda()
-
-    def train(self, data_loader, n_epochs):
-        self._save_gif()
-        for epoch in range(1, n_epochs + 1):
-            print('Starting epoch {}...'.format(epoch))
-            self._train_epoch(data_loader)
-
-            if epoch % self.save_every == 0 or epoch == n_epochs:
-                torch.save(self.G.state_dict(), self.dataset_name + '_gen_{}.pt'.format(epoch))
-                torch.save(self.D.state_dict(), self.dataset_name + '_disc_{}.pt'.format(epoch))
-
-    def _train_epoch(self, data_loader):
-        for i, (data, _) in enumerate(data_loader):
-            self.steps += 1
-            data = Variable(data)
-            if self.use_cuda:
-                data = data.cuda()
-
-            d_loss, grad_penalty = self._discriminator_train_step(data)
-            self.writer.add_scalars('losses', {'d_loss': d_loss, 'grad_penalty': grad_penalty}, self.steps)
-            self.hist.append({'d_loss': d_loss, 'grad_penalty': grad_penalty})
-
-            if i % 200 == 0:
-                img_grid = make_grid(self.G(self._fixed_z).cpu().data, normalize=True)
-                self.writer.add_image('images', img_grid, self.steps)
-
-            if self.steps % self.n_critic == 0:
-                g_loss = self._generator_train_step(data.size(0))
-                self.writer.add_scalars('losses', {'g_loss': g_loss}, self.steps)
-                self.hist[-1]['g_loss'] = g_loss
-
-        print('    g_loss: {:.3f} d_loss: {:.3f} grad_penalty: {:.3f}'.format(g_loss, d_loss, grad_penalty))
-
-    def _discriminator_train_step(self, data):
-        batch_size = data.size(0)
-        generated_data = self._sample(batch_size)
-        grad_penalty = self._gradient_penalty(data, generated_data)
-        d_loss = self.D(generated_data).mean() - self.D(data).mean() + grad_penalty
-        self.D_opt.zero_grad()
-        d_loss.backward()
-        self.D_opt.step()
-        return d_loss.item(), grad_penalty.item()
-
-    def _generator_train_step(self, batch_size):
-        self.G_opt.zero_grad()
-        generated_data = self._sample(batch_size)
-        g_loss = -self.D(generated_data).mean()
-        g_loss.backward()
-        self.G_opt.step()
-        return g_loss.item()
-
-    def _gradient_penalty(self, data, generated_data, gamma=10):
-        batch_size = data.size(0)
-        epsilon = torch.rand(batch_size, 1, 1, 1)
-        epsilon = epsilon.expand_as(data)
-
-
-        if self.use_cuda:
-            epsilon = epsilon.cuda()
-
-        interpolation = epsilon * data.data + (1 - epsilon) * generated_data.data
-        interpolation = Variable(interpolation, requires_grad=True)
-
-        if self.use_cuda:
-            interpolation = interpolation.cuda()
-
-        interpolation_logits = self.D(interpolation)
-        grad_outputs = torch.ones(interpolation_logits.size())
-
-        if self.use_cuda:
-            grad_outputs = grad_outputs.cuda()
-
-        gradients = autograd.grad(outputs=interpolation_logits,
-                                  inputs=interpolation,
-                                  grad_outputs=grad_outputs,
-                                  create_graph=True,
-                                  retain_graph=True)[0]
-
-        gradients = gradients.view(batch_size, -1)
-        gradients_norm = torch.sqrt(torch.sum(gradients ** 2, dim=1) + 1e-12)
-        return self.gamma * ((gradients_norm - 1) ** 2).mean()
-
-    def _sample(self, n_samples):
-        z = Variable(torch.randn(n_samples, *self.latent_shape))
-        if self.use_cuda:
-            z = z.cuda()
-        return self.G(z)
-
-    def _save_gif(self):
-        grid = make_grid(self.G(self._fixed_z).cpu().data, normalize=True)
-        grid = np.transpose(grid.numpy(), (1, 2, 0))
-        self.images.append(grid)
-        imageio.mimsave('{}.gif'.format(self.dataset_name), self.images)

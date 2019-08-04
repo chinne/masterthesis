@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.utils import save_image
 
-from . import accuracy_XGboost
+from ..common import accuracy_XGboost
 
 Tensor = torch.FloatTensor
 
@@ -99,8 +99,7 @@ def sample_image(n_row, batches_done):
 #  Training
 # ----------
 def train(
-    dataloader, prefix:str, data_dim: int, h_dim: int, z_dim: int, lr: float, num_epochs: int
-):
+    dataloader, prefix:str, data_dim: int, h_dim: int, z_dim: int, lr:float, num_epochs:int, feature_cols, label_col=[]):
 
     # Use binary cross-entropy loss
     adversarial_loss = torch.nn.BCELoss()
@@ -195,7 +194,7 @@ def train(
         G_losses.append(G_losses_iter_mean)
         D_losses.append(D_losses_iter_mean)
         if epoch % 10 is 0:
-            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data)
+            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data, feature_cols, label_col)
             xgb_losses = np.append(xgb_losses, xgb_loss)
             print(f"epoch: {epoch}, Accuracy: {xgb_loss}")
             print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]" % (epoch, num_epochs, i, len(dataloader), d_loss.item(), g_loss.item()))
