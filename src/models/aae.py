@@ -158,7 +158,7 @@ def train(
 
             # Loss measures generator's ability to fool the discriminator
             g_loss = 0.001 * adversarial_loss(
-                discriminator(encoded_data), valid
+                discriminator(encoded_data), valid.view(-1,30)
             ) + 0.999 * pixelwise_loss(decoded_data, real_data)
 
             g_loss.backward()

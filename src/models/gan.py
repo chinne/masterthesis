@@ -144,7 +144,7 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
             real_data_list.extend(real_data.numpy())
             
             D_RealLosses_iter.append(lossD_real.item())
-            D_FakeLosses_iter.append(lossD_fake.item())
+            0
             G_losses_iter.append(lossG.item())
 
         

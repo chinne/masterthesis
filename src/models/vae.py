@@ -75,83 +75,55 @@ class VAE(nn.Module):
         )
     
     def reparameterize(self, mu, logvar):
-        std = logvar.mul(0.5).exp_()
-        esp = to_var(torch.randn(*mu.size()))
-        z = mu + std * esp
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        z = mu + std * eps
         return z
     
     def forward(self, x):
         h = self.encoder(x)
         mu, logvar = torch.chunk(h, 2, dim=1)
+        #mu, logvar = self.encoder(x)
         z = self.reparameterize(mu, logvar)
         return self.decoder(z), mu, logvar
 
+def loss_function(recon_x, x, mu, logvar):
+    BCE = F.binary_cross_entropy(recon_x, x.view(-1,30), reduction='sum')
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) # Calculate KLD
+    return BCE + KLD
 
-def train(dataloader, num_epochs:int, data_dim:int, feature_cols, label_col=[], embeddingDim=128, compressDims=(128, 128), decompressDims=(128, 128)):
+def trainVAE(dataloader, num_epochs:int, data_dim:int, feature_cols, label_col=[], encoder_hidden_dim=20, decoder_hidden_dim=20, z_dim=5):
     '''
     Training function for the VAE
     '''
     
     Tensor = torch.FloatTensor
-    
-    encoder = Encoder(data_dim, compressDims, embeddingDim)
-    decoder = Decoder(embeddingDim, compressDims, data_dim)
-
-    def loss_function(recon_x, x, sigmas, mu, logvar):
-        print(recon_x.size(), x.size())
-        recon_loss = F.cross_entropy(recon_x, x.view(-1,29), reduction='sum')
-        KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) # Calculate KLD
-        return BCE + KLD
-
-
-    loss_factor = 2
-    l2scale = 1e-5
-    optimizer = optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), weight_decay=l2scale)
-    #Create VAE object
-    #vae = VAE(data_dim, encoder_hidden_dim, decoder_hidden_dim, z_dim) 
-    
-    #In case of an available supported gpu use it
-    #vae.to(device)
-    
-    #Construct optimizer for the VAE - in this case adam
-    #lr: learning rate (default: 1e-3)
-    #betas: coefficients used for computing running averages of gradient and its square (default: (0.9, 0.999))
-    #optimizer = optim.Adam(vae.parameters(), lr=lr, betas=(0.5, 0.999))
-    
-    losses = []
-    D_losses = []
-    
+    vae = VAE(data_dim, encoder_hidden_dim, decoder_hidden_dim, z_dim)
     # set the train mode
-    #vae.train()
-
-    # Creates a criterion that measures the Binary Cross Entropy between the target and the output
-    #adversarial_loss = nn.BCELoss()
+    vae.train()
+    train_loss = []
+    optimizer = optim.Adam(vae.parameters(), lr=1e-3)
+    
+    train_lost_list = []
+    test_lost_list = []
+    
 
     print("Starting Training Loop...")
     start_time = time()
-    train_loss = 0
     for epoch in range(num_epochs):
+        train_loss = 0
         for i, data in enumerate(dataloader):
-
-            #set gradients of all parameters of the optimizer to zero.
-            optimizer.zero_grad()
-
-            #get real data
-            real = Variable(data.type(Tensor))
-            mu, std, logvar = encoder(real)
-
-            eps = torch.randn_like(std)
-            emb = eps * std + mu #sample z
-            rec, sigmas = decoder(emb) 
-
-            Loss = loss_function(rec, real, sigmas, mu, logvar)
+            data = Variable(data.type(Tensor))
+            optimizer.zero_grad()            
+            recon_batch, mu, logvar = vae(data)
+            loss = loss_function(recon_batch, data, mu, logvar)
             loss.backward()
             train_loss += loss.item()
             optimizer.step()           
-
-            #decoder.sigma.data.clamp_(0.01, 1.)
-    print('====> Epoch: {} Average loss: {:.4f}'.format(
-          epoch, train_loss / len(train_loader.dataset)))
+        
+        train_lost_list.append(train_loss)
+        print('====> Epoch: {} Average loss: {:.4f}'.format(
+            epoch, train_loss / len(dataloader.dataset)))
         
 
 
@@ -163,23 +135,21 @@ def train(dataloader, num_epochs:int, data_dim:int, feature_cols, label_col=[], 
     end_time = time()
     seconds_elapsed = end_time - start_time
     print('It took ', seconds_elapsed)
-    return losses
+    return train_lost_list
 
 
 
+def test_vae():
+    vae.eval()
+    test_loss = 0
+    with torch.no_grad():
+        for i, data in enumerate(testloader):
+            data = Variable(data.type(Tensor))
+            recon_batch, mu, logvar = vae(data)
+            test_loss += loss_function(recon_batch, data, mu, logvar).item()
+            if i == 0:
+                n = 
 
-
-def loss_function(recon_x, x, mu, logvar):
-    
-    BCE = F.binary_cross_entropy(recon_x, x.view(-1, 64), reduction='sum')
-
-    # see Appendix B from VAE paper:
-    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-    # https://arxiv.org/abs/1312.6114
-    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-    return BCE + KLD
 
 
 def generate(self, n):
@@ -207,3 +177,5 @@ def generate(self, n):
             data = self.transformer.inverse_transform(data, sigmas.detach().cpu().numpy())
             ret.append((epoch, data))
         return ret
+
+
