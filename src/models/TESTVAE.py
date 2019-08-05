@@ -7,6 +7,9 @@ from torch.autograd import Variable
 import numpy as np
 from time import time
 
+
+from ..common import accuracy_XGboost
+
 class Encoder(nn.Module):
     def __init__(self, dataDim, compressDims, embeddingDim):
         super(Encoder, self).__init__()
@@ -111,12 +114,14 @@ def trainVAE(dataloader, num_epochs:int, data_dim:int, feature_cols, label_col=[
     
     train_lost_list = []
     test_lost_list = []
-    
+    xgb_losses = []
 
     print("Starting Training Loop...")
     start_time = time()
     for epoch in range(num_epochs):
         train_loss = 0
+        generated_data = []
+        real_data_list = []
         for i, data in enumerate(dataloader):
             real = Variable(data.type(Tensor))
             # optimizer.zero_grad()            
@@ -136,8 +141,15 @@ def trainVAE(dataloader, num_epochs:int, data_dim:int, feature_cols, label_col=[
             train_loss += loss.item()
             optimizerAE.step()
             decoder.sigma.data.clamp_(0.01, 1.)
+            # Save Losses for plotting later
+            generated_data.extend(rec.detach().numpy())
+            real_data_list.extend(real.numpy())
 
         if epoch % 10 == 0:
+            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data, feature_cols, label_col)
+            xgb_losses = np.append(xgb_losses, xgb_loss)
+            print(f'epoch: {epoch}, Accuracy: {xgb_loss}')
+            accuracy_XGboost.PlotData(real_data_list, generated_data, feature_cols, label_col, seed=42, data_dim=2)
             torch.save({
                 "encoder": encoder.state_dict(),
                 "decoder": decoder.state_dict()
@@ -166,6 +178,8 @@ def generate(n:int, num_epochs:int, epoch:int, data_dim:int, embeddingDim=5, com
     decoder = Decoder(embeddingDim, compressDims, data_dim)
 
     ret = []
+    data = []
+    generated_data = []
     for i in range(num_epochs):
         checkpoint = torch.load("models/VAE/model_{}.tar".format(epoch))
         decoder.load_state_dict(checkpoint['decoder'])
@@ -173,16 +187,16 @@ def generate(n:int, num_epochs:int, epoch:int, data_dim:int, embeddingDim=5, com
         #decoder.to(self.device)
 
         steps = n // batch_size + 1
-        data = []
-        for i in range(steps):
-            mean = torch.zeros(batch_size, embeddingDim)
-            std = mean + 1
-            noise = torch.normal(mean=mean, std=std)#.to(self.device)
-            fake, sigmas = decoder(noise)
-            fake = torch.tanh(fake)
-            data.append(fake.detach().cpu().numpy())
-        data = np.concatenate(data, axis=0)
-        data = data[:n]
+        
+        # for i in range(steps):
+        mean = torch.zeros(batch_size, embeddingDim)
+        std = mean + 1
+        noise = torch.normal(mean=mean, std=std)#.to(self.device)
+        fake, sigmas = decoder(noise)
+        fake = torch.tanh(fake)
+        generated_data.extend(fake.detach().cpu().numpy())#.item())
+        # data = np.concatenate(data, axis=0)
+        # data = data[:n]
         #data = self.transformer.inverse_transform(data, sigmas.detach().cpu().numpy())
-        ret.append(data)
-    return ret
+        #ret.append(data)
+    return generated_data
