@@ -1,3 +1,25 @@
 # exclude data from source control by default
-/data/
-/models/
+data/
+
+.ipynb_checkpoints
+
+models/cgan/generator
+models/cgan/discriminator
+
+models/gan/generator
+models/gan/discriminator
+
+models/wgan/critic
+models/wgan/generator
+
+models/cwgan/generator
+models/cwgan/critic
+
+models/wgangp/generator
+models/wgangp/critic
+
+models/aae/decoder
+
+models/vae
+
+/archive

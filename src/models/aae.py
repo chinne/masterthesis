@@ -61,7 +61,7 @@ class Decoder(nn.Module):
             nn.BatchNorm1d(h_dim),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(h_dim, data_dim),
-            nn.Tanh(),
+            nn.Sigmoid(),
         )
 
     def forward(self, z):
@@ -155,11 +155,11 @@ def train(
             encoded_data = encoder(real_data)
             #             decoded_imgs = decoder(encoded_imgs)
             decoded_data = decoder(encoded_data)
-
+            test = discriminator(encoded_data)
+            print(test.shape)
+            print(valid.shape)
             # Loss measures generator's ability to fool the discriminator
-            g_loss = 0.001 * adversarial_loss(
-                discriminator(encoded_data), valid.view(-1,30)
-            ) + 0.999 * pixelwise_loss(decoded_data, real_data)
+            g_loss = 0.001 * F.binary_cross_entropy(discriminator(encoded_data), valid.view(-1,) + 0.999 * pixelwise_loss(decoded_data, real_data)
 
             g_loss.backward()
             optimizer_G.step()
@@ -201,7 +201,7 @@ def train(
             torch.save({
                 "Epochs": epoch,
                 "decoder": decoder.state_dict()
-                }, "{}/decoder_{}_{}.pth".format('models', prefix, epoch))
+                }, "models/aae/decoder/decoder_{}.pth".format(epoch))
     end_time = time()
     seconds_elapsed = end_time - start_time
     print('It took ', seconds_elapsed)
@@ -214,7 +214,7 @@ def generate_data(epoch, data_dim: int, h_dim: int, z_dim: int, amount, device):
     else:
         Tensor = torch.cuda.FloatTensor
     decoder = Decoder(data_dim, h_dim, z_dim)
-    checkpoint = torch.load(f'models/decoder_{str(epoch)}.pth')
+    checkpoint = torch.load(f'models/aae/decoder/decoder_{str(epoch)}.pth')
     decoder.load_state_dict(checkpoint['decoder'])
     decoder.eval()
     noise = Variable(Tensor(np.random.normal(0, 1, (amount, z_dim))))

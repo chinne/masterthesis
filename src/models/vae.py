@@ -158,7 +158,7 @@ def generate(self, n):
 
         ret = []
         for epoch in self.store_epoch:
-            checkpoint = torch.load("{}/model_{}.tar".format(self.working_dir, epoch))
+            checkpoint = torch.load("models/aae/decoder/model_{}.tar".format(epoch))
             decoder.load_state_dict(checkpoint['decoder'])
             decoder.eval()
             decoder.to(self.device)

@@ -153,7 +153,7 @@ def trainVAE(dataloader, num_epochs:int, data_dim:int, feature_cols, label_col=[
             torch.save({
                 "encoder": encoder.state_dict(),
                 "decoder": decoder.state_dict()
-            }, "models/VAE/model_{}.tar".format(epoch))
+            }, "models/vae/model_{}.tar".format(epoch))
        
     
         train_lost_list.append(train_loss)
@@ -181,7 +181,7 @@ def generate(n:int, num_epochs:int, epoch:int, data_dim:int, embeddingDim=5, com
     data = []
     generated_data = []
     for i in range(num_epochs):
-        checkpoint = torch.load("models/VAE/model_{}.tar".format(epoch))
+        checkpoint = torch.load("models/vae/model_{}.tar".format(epoch))
         decoder.load_state_dict(checkpoint['decoder'])
         decoder.eval()
         #decoder.to(self.device)

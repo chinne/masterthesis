@@ -1,7 +1,7 @@
-﻿generative_models_handling_imbalanced_data
-==============================
+﻿Deep generative models as an approach to generate new artificial tabular data
+==============================================================================
 
-Using deep generative models as oversampling method to generate new artificial data.
+Using Generative Adversarial Networks, Wasserstein GAN and Variational Autoencoder as oversampling method to generate new artificial data.
 
 Project Organization
 ------------
@@ -11,11 +11,7 @@ Project Organization
     │   ├── processed      <- The final, canonical data sets for modeling.
     │   └── raw            <- The original, immutable data dump.
     │
-    ├── models             <- Trained and serialized models, model predictions, or model summaries
-    │
-    ├── notebooks          <- Jupyter notebooks. Naming convention is a number (for ordering),
-    │                         the creator's initials, and a short `-` delimited description, e.g.
-    │                         `1.0-jqp-initial-data-exploration`.
+    ├── models             <- Savings of the trained models
     │
     ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
     │
@@ -31,18 +27,15 @@ Project Organization
         ├── data           <- Scripts to download or generate data
         │   └── make_dataset.py
         │
-        ├── features       <- Scripts to turn raw data into features for modeling
-        │   └── build_features.py
         │
         ├── models         <- Scripts to train models and then use trained models to make
         │   │                 predictions
-        │   ├── predict_model.py
-        │   └── train_model.py
-        │
-        └── visualization  <- Scripts to create exploratory and results oriented visualizations
-            └── visualize.py
-
-
---------
-
-<p><small>Project based on the <a target="_blank" href="https://drivendata.github.io/cookiecutter-data-science/">cookiecutter data science project template</a>. #cookiecutterdatascience</small></p>
+        │   ├── gan.py
+        │   ├── cgan.py
+		│	├── wgan.py
+        │	├── cwgan.py
+		│	└── vae.py
+		│
+        └── common  <- Scripts to help out
+            ├── accuracy_XGboost.py
+			└── helperfunctions.py

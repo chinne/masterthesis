@@ -1,20 +1,14 @@
+import numpy as np
+from time import time
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
-import numpy as np
 from torch.autograd import Variable
-
-import random
-from time import time
-
 
 from ..common import accuracy_XGboost
 
-randomSeed=42
-random.seed(randomSeed)
-torch.manual_seed(randomSeed)
 
 class Generator(nn.Module):
     '''
@@ -73,9 +67,11 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
     Tensor = torch.FloatTensor
 #     else:
 #         Tensor = torch.cuda.FloatTensor
-        
+
+
         
     G_losses = []
+    D_losses = []
     D_RealLosses = []
     D_FakeLosses = []
     xgb_losses = []
@@ -102,6 +98,8 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
         G_losses_iter = []
         D_RealLosses_iter = []
         D_FakeLosses_iter = []
+        D_losses_iter_mean = []
+        D_losses_iter = []
         generated_data = []
         real_data_list = []
         for i, data in enumerate(dataloader):
@@ -142,17 +140,22 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
             # Save Losses for plotting later
             generated_data.extend(fake_samples.detach().numpy())
             real_data_list.extend(real_data.numpy())
-            
+            losses = lossD_fake + lossD_real
+            D_losses_iter.append(losses.item())
+            D_FakeLosses_iter.append(lossD_fake.item())
             D_RealLosses_iter.append(lossD_real.item())
-            0
             G_losses_iter.append(lossG.item())
 
         
         G_losses_iter_mean = sum(G_losses_iter)/len(G_losses_iter)
+        G_losses.append(sum(G_losses_iter)/len(G_losses_iter))
+        D_losses.append(sum(D_losses_iter)/len(D_losses_iter))
+
+        D_losses_iter_mean = sum(D_losses_iter)/len(D_losses_iter)
         D_RealLosses_iter_mean = sum(D_RealLosses_iter)/len(D_RealLosses_iter)
         D_FakeLosses_iter_mean = sum(D_FakeLosses_iter)/len(D_FakeLosses_iter)
-
-        G_losses.append(G_losses_iter_mean)
+        
+        
         D_RealLosses.append(D_RealLosses_iter_mean)
         D_FakeLosses.append(D_FakeLosses_iter_mean)
 
@@ -168,28 +171,22 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
                     "Epochs": epoch,
                     "generator": netG.state_dict(),
                     "optimizerG": optimizerG.state_dict(),
-                }, "{}/generator_{}.pth".format('models', epoch))
+                }, "models/gan/generator/generator_{}.pth".format(epoch))
             
             torch.save({
                     "Epochs": epoch,
                     "discriminator": netD.state_dict(),
                     "optimizerD": optimizerD.state_dict()
-                }, "{}/discriminator_{}.pth".format('models', epoch))
+                }, "models/gan/discriminator/discriminator_{}.pth".format(epoch))
 
             accuracy_XGboost.PlotData(real_data_list, generated_data, feature_cols, label_col, seed=42, data_dim=2)
-                # # Check how the generator is doing by saving G's output on fixed_noise
-                # if (iters % 500 == 0) or ((epoch == epochs-1) and (i == len(dataloader)-1)):
-                #     with torch.no_grad():
-                #         fake = netG(fixed_noise).detach().cpu()
-                #     img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
-
             
 
 
     end_time = time()
     seconds_elapsed = end_time - start_time
     print('It took ', seconds_elapsed)
-    return xgb_losses, G_losses, D_RealLosses, D_FakeLosses, generated_data, real_data_list
+    return xgb_losses, D_losses, G_losses, D_RealLosses, D_FakeLosses, generated_data, real_data_list
 
 def generate_data(epoch: int, randomNoise_dim: int, hidden_dim: int, realData_dim: int, amount: int, device: str):
     if device is 'cpu':
@@ -197,7 +194,7 @@ def generate_data(epoch: int, randomNoise_dim: int, hidden_dim: int, realData_di
     else:
         Tensor = torch.cuda.FloatTensor
     netG = Generator(randomNoise_dim, hidden_dim, realData_dim).to(device)
-    checkpoint = torch.load(f'models/generator_{str(epoch)}.pth')
+    checkpoint = torch.load(f'models/gan/generator/generator_{str(epoch)}.pth')
     netG.load_state_dict(checkpoint['generator'])
     noise = Variable(Tensor(np.random.normal(0, 1, (amount, randomNoise_dim))))
     generated_data = netG(noise)

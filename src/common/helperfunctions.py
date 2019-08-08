@@ -16,12 +16,16 @@ class CreditcardDataset(Dataset):
         if self.withLabel is True:
             self.features = torch.tensor(self.df[:, 0:-1], dtype= torch.float32).to(self.device)
             self.label = torch.tensor(self.df[:, [-1]], dtype= torch.float32).to(self.device)
-            print('sdf')
-        self.features = torch.tensor(self.df, dtype=torch.float32).to(self.device)
+        else:
+            self.features = torch.tensor(self.df, dtype=torch.float32).to(self.device)
+        
 
     def __getitem__(self, index):
-        return self.features[index]
-
+        if self.withLabel is True:
+            return (self.features[index], self.label[index])
+        else:
+            return (self.features[index])
+            
     def __len__(self):
         return self.len
 

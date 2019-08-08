@@ -88,7 +88,7 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
     # optimizerG = optim.Adam(netG.parameters(), lr=lr)
     # optimizerD = optim.Adam(netD.parameters(), lr=lr)
     clip_value = 0.01
-    n_critic = 5
+    n_critic = 2
     # set the train mode - Just necessary if dropout used
     # netG.train()
     # netD.train()    
@@ -154,13 +154,13 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
                     "Epochs": epoch,
                     "generator": netG.state_dict(),
                     "optimizerG": optimizerG.state_dict(),
-                }, "{}/generator_{}.pth".format('models', epoch))
+                }, "models/wgan/generator/generator_{}.pth".format(epoch))
             
             torch.save({
                     "Epochs": epoch,
-                    "discriminator": netD.state_dict(),
+                    "critic": netD.state_dict(),
                     "optimizerD": optimizerD.state_dict()
-                }, "{}/discriminator_{}.pth".format('models', epoch))
+                }, "models/wgan/critic/critic_{}.pth".format(epoch))
 
             accuracy_XGboost.PlotData(real_data_list, generated_data, feature_cols, label_col, seed=42, data_dim=2)
                 # # Check how the generator is doing by saving G's output on fixed_noise
@@ -183,7 +183,7 @@ def generate_data(epoch: int, randomNoise_dim: int, hidden_dim: int, realData_di
     else:
         Tensor = torch.cuda.FloatTensor
     netG = Generator(randomNoise_dim, hidden_dim, realData_dim).to(device)
-    checkpoint = torch.load(f'models/generator_{str(epoch)}.pth')
+    checkpoint = torch.load(f'models/wgan/generator/generator_{str(epoch)}.pth')
     netG.load_state_dict(checkpoint['generator'])
     noise = Variable(Tensor(np.random.normal(0, 1, (amount, randomNoise_dim))))
     generated_data = netG(noise)

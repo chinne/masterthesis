@@ -108,13 +108,14 @@ def compute_gradient_penalty(D, real_samples, fake_samples):
         only_inputs=True,
     )[0]
     gradients = gradients.view(gradients.size(0), -1)
+    gradients_norm = torch.sqrt(torch.sum(gradients ** 2, dim=1) + 1e-12)
     gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
     return gradient_penalty
 
 # Loss weight for gradient penalty
 lambda_gp = 10
 
-def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr:float, num_epochs:int, device=None):
+def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr:float, num_epochs:int, feature_cols, label_col=[], device='cpu'):
     
     if device == 'cuda':
         Tensor = torch.cuda.FloatTensor
@@ -179,7 +180,6 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
                 optimizerG.step()
 
             # Save Losses for plotting later
-            print(fake_samples.shape)
             generated_data.extend(fake_samples.detach().numpy())
             real_data_list.extend(real_data.numpy())
             
@@ -193,7 +193,7 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
 
         
         if epoch % 10 is 0:
-            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data)
+            xgb_loss = accuracy_XGboost.CheckAccuracy(real_data_list, generated_data, feature_cols)
             xgb_losses = np.append(xgb_losses, xgb_loss)
             print(f'epoch: {epoch}, Accuracy: {xgb_loss}')
             print('[%d/%d][%d/%d]\tLoss_C: %.4f\tLoss_G: %.4f\t'
@@ -203,19 +203,19 @@ def train(dataloader, randomNoise_dim:int, hidden_dim: int, realData_dim:int, lr
                     "Epochs": epoch,
                     "generator": netG.state_dict(),
                     "optimizerG": optimizerG.state_dict(),
-                }, "{}/generator_{}.pth".format('models', epoch))
+                }, "models/wgangp/generator/generator_{}.pth".format(epoch))
             
             torch.save({
                     "Epochs": epoch,
                     "critic": netC.state_dict(),
                     "optimizerD": optimizerC.state_dict()
-                }, "{}/critic_{}.pth".format('models', epoch))
+                }, "models/wgangp/critic/critic_{}.pth".format(epoch))
             # # Check how the generator is doing by saving G's output on fixed_noise
             # if (iters % 500 == 0) or ((epoch == epochs-1) and (i == len(dataloader)-1)):
             #     with torch.no_grad():
             #         fake = netG(fixed_noise).detach().cpu()
             #     img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
-
+            accuracy_XGboost.PlotData(real_data_list, generated_data, feature_cols, label_col, seed=42, data_dim=2)
             
 
 
@@ -230,7 +230,7 @@ def generate_data(epoch: int, randomNoise_dim: int, hidden_dim: int, realData_di
     else:
         Tensor = torch.cuda.FloatTensor
     netG = Generator(randomNoise_dim, hidden_dim, realData_dim).to(device)
-    checkpoint = torch.load(f'models/generator_{str(epoch)}.pth')
+    checkpoint = torch.load(f'models/wgangp/generator/generator_{str(epoch)}.pth')
     netG.load_state_dict(checkpoint['generator'])
     noise = Variable(Tensor(np.random.normal(0, 1, (amount, randomNoise_dim))))
     generated_data = netG(noise)
